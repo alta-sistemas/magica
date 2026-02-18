@@ -86,7 +86,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password: pass,
     });
 
-    if (error) return 'Email ou senha incorretos.';
+    if (error) {
+        console.error("Login Error:", error);
+        // Tratamento específico para erros comuns
+        if (error.message.includes("Email not confirmed")) {
+            return "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou contate o admin.";
+        }
+        if (error.message.includes("Invalid login credentials")) {
+            return "E-mail ou senha incorretos.";
+        }
+        return error.message; // Retorna a mensagem real para ajudar no debug
+    }
 
     // Check status immediately after login
     if (data.user) {
