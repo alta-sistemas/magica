@@ -21,37 +21,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // --- Fetch Profile Helper ---
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    
-    if (error) {
-      console.error('Error fetching profile:', error);
-      return null;
+  // --- Fetch Profile Helper (with Retry) ---
+  const fetchProfile = async (userId: string, retries = 3): Promise<User | null> => {
+    try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        
+        if (error) {
+          // Se não encontrou (PGRST116) ou erro de rede, e ainda tem tentativas
+          if (retries > 0) {
+             console.log(`Profile not found, retrying... (${retries} left)`);
+             await new Promise(r => setTimeout(r, 1000)); // Espera 1 segundo
+             return fetchProfile(userId, retries - 1);
+          }
+          console.error('Error fetching profile final:', error);
+          return null;
+        }
+        return data as User;
+    } catch (e) {
+        console.error("Exception fetching profile:", e);
+        return null;
     }
-    return data as User;
   };
 
   // --- Initialization ---
   useEffect(() => {
     // Check active session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        const profile = await fetchProfile(session.user.id);
-        setUser(profile);
-      }
-      setLoading(false);
-    });
+    const initSession = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            const profile = await fetchProfile(session.user.id);
+            if (profile) setUser(profile);
+        }
+        setLoading(false);
+    };
+
+    initSession();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
-        const profile = await fetchProfile(session.user.id);
-        setUser(profile);
+        // Se for um novo login (SIGNED_IN), tentamos buscar o perfil
+        if (!user || user.id !== session.user.id) {
+            const profile = await fetchProfile(session.user.id);
+            if (profile) setUser(profile);
+        }
       } else {
         setUser(null);
       }
@@ -59,7 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, []); // Remove user dependency to avoid loop
 
   // --- Actions ---
 
@@ -74,18 +91,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Check status immediately after login
     if (data.user) {
         const profile = await fetchProfile(data.user.id);
-        if (profile) {
-            if (profile.status === 'pending') {
-                await supabase.auth.signOut();
-                return 'Sua conta aguarda aprovação do administrador.';
-            }
-            if (profile.status === 'rejected') {
-                await supabase.auth.signOut();
-                return 'Sua conta foi recusada.';
-            }
-            setUser(profile);
-            return null;
+        
+        if (!profile) {
+            // Se chegou aqui, o Auth existe mas o Profile não.
+            // Isso acontece se o trigger falhou ou usuário foi criado manualmente sem perfil.
+            await supabase.auth.signOut();
+            return 'Erro: Perfil de usuário não encontrado no banco de dados. Contate o suporte.';
         }
+
+        if (profile.status === 'pending') {
+            await supabase.auth.signOut();
+            return 'Sua conta aguarda aprovação do administrador.';
+        }
+        if (profile.status === 'rejected') {
+            await supabase.auth.signOut();
+            return 'Sua conta foi recusada.';
+        }
+        
+        setUser(profile);
+        return null;
     }
     return 'Erro ao carregar perfil de usuário.';
   };
