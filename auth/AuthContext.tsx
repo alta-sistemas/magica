@@ -90,13 +90,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Check status immediately after login
     if (data.user) {
-        const profile = await fetchProfile(data.user.id);
+        let profile = await fetchProfile(data.user.id);
         
         if (!profile) {
             // Se chegou aqui, o Auth existe mas o Profile não.
-            // Isso acontece se o trigger falhou ou usuário foi criado manualmente sem perfil.
-            await supabase.auth.signOut();
-            return 'Erro: Perfil de usuário não encontrado no banco de dados. Contate o suporte.';
+            // Tenta criar automaticamente o perfil (Self-Healing)
+            console.log("Profile missing. Attempting auto-creation...");
+            const { error: insertError } = await supabase.from('profiles').insert({
+                id: data.user.id,
+                email: data.user.email,
+                name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'User',
+                role: 'user',
+                status: 'pending',
+                credits: 5
+            });
+
+            if (!insertError) {
+                profile = await fetchProfile(data.user.id);
+            }
+        }
+
+        if (!profile) {
+             await supabase.auth.signOut();
+             return 'Erro: Perfil de usuário não encontrado e não foi possível criá-lo automaticamente. Contate o suporte.';
         }
 
         if (profile.status === 'pending') {
