@@ -21,22 +21,28 @@ export const Login: React.FC = () => {
     setError(null);
     setSuccessMsg(null);
 
+    // Remove espaços em branco acidentais
+    const email = formData.email.trim();
+    const pass = formData.password.trim();
+    const name = formData.name.trim();
+
     try {
       if (isRegistering) {
-        const err = await register(formData.email, formData.password, formData.name);
+        const err = await register(email, pass, name);
         if (err) {
           setError(err);
         } else {
-          setSuccessMsg("Conta criada! Aguarde aprovação do administrador para entrar.");
+          setSuccessMsg("Conta criada! Se o email de confirmação estiver ativado, verifique sua caixa de entrada.");
           setIsRegistering(false);
           setFormData({ name: '', email: '', password: '' });
         }
       } else {
-        const err = await login(formData.email, formData.password);
+        const err = await login(email, pass);
         if (err) setError(err);
       }
     } catch (e) {
       setError("Ocorreu um erro inesperado.");
+      console.error(e);
     } finally {
       setLoading(false);
     }
